@@ -1,381 +1,248 @@
-<div align="center">
+# Sherlock Files — Frame Reordering via TSP on Pixel Features
 
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=32&pause=1000&color=F7A800&center=true&vCenter=true&width=600&lines=ChronoSherlock+%F0%9F%94%8E;Temporal+Reasoning+at+Scale;MLWare'26+Top-Tier+Submission" alt="ChronoSherlock" />
-
-<br/>
-
-# 🔎 ChronoSherlock
-
-### _Cracking the Case of Temporal Inference — One Timestamp at a Time_
-
-<p align="center">
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/></a>
-  <a href="https://pytorch.org/"><img src="https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white" alt="PyTorch"/></a>
-  <a href="https://scikit-learn.org/"><img src="https://img.shields.io/badge/Scikit--Learn-1.x-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white" alt="scikit-learn"/></a>
-  <a href="https://www.kaggle.com/competitions/ml-ware-26-sherlock-files"><img src="https://img.shields.io/badge/Kaggle-MLWare'26-20BEFF?style=for-the-badge&logo=kaggle&logoColor=white" alt="Kaggle"/></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge" alt="License"/></a>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Public%20Score-0.13024-gold?style=flat-square&labelColor=1a1a2e" alt="Public Score"/>
-  &nbsp;
-  <img src="https://img.shields.io/badge/Private%20Score-0.11012-brightgreen?style=flat-square&labelColor=1a1a2e" alt="Private Score"/>
-  &nbsp;
-  <img src="https://img.shields.io/badge/Competition-IIT--BHU%20MLWare'26-blueviolet?style=flat-square&labelColor=1a1a2e" alt="Competition"/>
-</p>
-
-</div>
+**Competition:** MLWare '26 Sherlock Files (Technex, IIT BHU)
+**Task:** Recover the correct chronological order of shuffled video frames
+**Metric:** Mean Kendall Tau (τ) across all test videos
 
 ---
 
-## 📌 Table of Contents
+## Problem Summary
 
-- [The Problem](#-the-problem)
-- [The Solution — ChronoSherlock](#-the-solution--chronosherlock)
-- [🏆 Proof of Performance](#-proof-of-performance)
-- [🧠 Methodology & Pipeline](#-methodology--pipeline)
-- [📁 Repository Structure](#-repository-structure)
-- [⚙️ Installation](#️-installation)
-- [🚀 Usage](#-usage)
-- [📊 Results & Evaluation](#-results--evaluation)
-- [🛠️ Tech Stack](#️-tech-stack)
-- [📜 License](#-license)
+Each video in the dataset has had its temporal structure corrupted: the original frames are split into monotone blocks (some reversed), then the blocks are shuffled randomly. Given only the corrupted video, the goal is to predict the permutation that restores the correct chronological order.
+
+The dataset contains approximately 5600 training videos and 296 test videos, with frame counts ranging from 30 to 288.
 
 ---
 
-## 🕵️ The Problem
+## Approach
 
-The [MLWare'26 — Sherlock Files](https://www.kaggle.com/competitions/ml-ware-26-sherlock-files) competition, hosted by **IIT-BHU on Kaggle**, presented a deceptively difficult challenge in **temporal reasoning and inference from unstructured data**.
+### Key Insight
 
-Competitors were tasked with building a model capable of determining **when** — extracting, inferring, or predicting temporal attributes from complex, multi-modal or text-rich inputs where time is implicit, obfuscated, or requires multi-step deduction. Much like Sherlock Holmes piecing together a timeline from scattered clues, the model must synthesize contextual signals into a precise temporal verdict.
+The corruption preserves local structure within blocks — adjacent frames in the correct sequence are stored at nearby positions in the corrupted video and look nearly identical. This means frame reordering is fundamentally a **shortest-path problem**: the correct temporal ordering corresponds to the path through frame-space that minimises total visual change.
 
-The core difficulty lies in three compounding factors:
+We solve this as a Travelling Salesman Problem (TSP) on frame features.
 
-- **Temporal ambiguity** — Dates and times are rarely explicit; they must be inferred from contextual and linguistic cues.
-- **Distribution shift** — Public and private leaderboard splits test generalization beyond superficial pattern-matching.
-- **Evaluation strictness** — The metric heavily penalizes confident wrong predictions, rewarding calibrated, evidence-driven inference.
+### Why Pixel Features, Not DINOv2
 
-This is not a standard regression or classification task. It is a **reasoning problem disguised as a prediction problem**.
+Our first approach used DINOv2 (a self-supervised vision transformer) for frame embeddings, but it achieved only τ ≈ 0.39 undirected path quality. The reason: DINOv2 is designed to be _invariant_ to small visual changes — it maps a cat at pixel (100, 50) and a cat at pixel (103, 52) to nearly identical embeddings. But temporal adjacency _is_ a small visual change (an object shifted by a few pixels between consecutive frames). DINOv2 deliberately discards exactly the signal we need.
 
----
+Raw pixel features at 48×48 resolution are _sensitive_ to these small changes. For physics simulations with fixed cameras, pixel L2 distance directly measures how much stuff moved — which is minimal for temporally adjacent frames.
 
-## 🔬 The Solution — ChronoSherlock
-
-**ChronoSherlock** is a [DESCRIBE OVERALL APPROACH: e.g., *hybrid transformer-based regression pipeline / gradient-boosted ensemble / fine-tuned LLM with structured head*] purpose-built to crack temporal inference at scale.
-
-The system operates on the conviction that **time leaves fingerprints everywhere** — in vocabulary, syntax, metadata, and semantic context. ChronoSherlock is engineered to read those fingerprints.
-
-### Core Design Philosophy
-
-> _"When you have eliminated the impossible, whatever remains, however improbable, must contain the timestamp."_
-
-The architecture is built around three principles:
-
-1. **Signal Richness** — Extract every temporal signal available, from explicit tokens to latent distributional markers.
-2. **Robust Generalization** — Regularize aggressively to ensure the private leaderboard score reflects — or improves upon — the public score.
-3. **Calibrated Confidence** — Avoid overconfident predictions; the loss function rewards epistemic humility.
-
----
-
-## 🏆 Proof of Performance
-
-> This section documents the verified leaderboard standing achieved by ChronoSherlock in the MLWare'26 — Sherlock Files competition hosted by IIT-BHU.
-
-<div align="center">
-
-![Proof of Performance: MLWare'26 Leaderboard](./image_938557.jpg)
-
-**📸 Figure 1 — Official Kaggle Leaderboard Snapshot**
-_ChronoSherlock's best submission recorded a **Public Score of 0.13024** and a **Private Score of 0.11012**, placing it among the top-performing solutions in the competition. Crucially, the Private Score (0.11012) **outperforms the Public Score**, a definitive indicator that this solution generalizes — not overfits — the data distribution._
-
-</div>
-
-| Metric               | Score      | Significance                                                                           |
-| -------------------- | ---------- | -------------------------------------------------------------------------------------- |
-| 📊 **Public Score**  | `0.13024`  | Evaluated on the public leaderboard subset during the competition                      |
-| 🔒 **Private Score** | `0.11012`  | Final evaluation on the held-out private test set — the ground truth of generalization |
-| 📈 **Score Delta**   | `−0.02012` | Negative delta confirms the model **improved** on unseen data                          |
-
-> ⚡ A lower score on the private set than the public set is the hallmark of a well-regularized, production-ready model. This is not luck — it is engineering.
-
----
-
-## 🧠 Methodology & Pipeline
-
-ChronoSherlock's pipeline is a deliberate sequence of signal extraction, representation learning, and calibrated prediction. Each stage is designed to maximize information retention while minimizing noise propagation.
+### Pipeline
 
 ```
-Raw Input Data
-      │
-      ▼
-┌─────────────────────┐
-│  1. Data Processing  │  ◄─── Cleaning, Normalization, Deduplication
-└─────────┬───────────┘
-          │
-          ▼
-┌──────────────────────────┐
-│  2. Feature Engineering   │  ◄─── Temporal Signals, Contextual Embeddings
-└─────────┬────────────────┘
-          │
-          ▼
-┌──────────────────────────┐
-│  3. Model Architecture    │  ◄─── [YOUR ARCHITECTURE HERE]
-└─────────┬────────────────┘
-          │
-          ▼
-┌──────────────────────────┐
-│  4. Training & Tuning     │  ◄─── Loss, Optimizer, Scheduler, CV Strategy
-└─────────┬────────────────┘
-          │
-          ▼
-┌──────────────────────────┐
-│  5. Inference & Ensemble  │  ◄─── [ENSEMBLE STRATEGY IF ANY]
-└─────────┬────────────────┘
-          │
-          ▼
-     Submission CSV
+┌──────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│  Read video   │────▶│  Pixel features   │────▶│  L2 distance     │
+│  cv2 decode   │     │  48×48 RGB flat   │     │  matrix N×N      │
+└──────────────┘     └──────────────────┘     └────────┬─────────┘
+                                                       │
+                                                       ▼
+                                              ┌──────────────────┐
+                                              │  TSP solver       │
+                                              │  multi-start NN   │
+                                              │  + 2-opt refine   │
+                                              └────────┬─────────┘
+                                                       │
+                                                       ▼
+                                              ┌──────────────────┐
+                                              │  Direction        │
+                                              │  ensemble:        │
+                                              │  • transformer    │
+                                              │  • physics cues   │
+                                              └────────┬─────────┘
+                                                       │
+                                                       ▼
+                                              ┌──────────────────┐
+                                              │  submission.csv   │
+                                              │  1..N permutation │
+                                              └──────────────────┘
 ```
 
----
+### Direction Prediction
 
-### Stage 1 — 🗂️ Data Processing
+TSP recovers the correct ordering up to direction (the path could be chronological or reversed). We resolve this ambiguity with an ensemble of two signals:
 
-The foundation of any high-performing ML system is clean, well-structured data. ChronoSherlock applies the following preprocessing steps:
+1. **Trained transformer model** on cached DINOv2 features. Although DINOv2 is poor for TSP distances, it still captures enough semantic information for the model to weakly predict temporal direction. The correlation between model scores and path position is used as a soft vote.
 
-- **[DESCRIBE RAW DATA FORMAT: e.g., *Text documents, JSON records, tabular CSVs*]**
-- Lowercasing, Unicode normalization, and punctuation standardization for text inputs.
-- Handling of missing values via **[IMPUTATION STRATEGY: e.g., *median imputation / forward-fill / learned masking*]**.
-- Train/validation split using **[SPLIT STRATEGY: e.g., *stratified K-Fold / time-aware split*]** to prevent data leakage.
-- Removal of duplicate and near-duplicate samples identified via **[DEDUP METHOD: e.g., *MinHash LSH / exact hash matching*]**.
-
----
-
-### Stage 2 — ⚙️ Feature Engineering
-
-This is where domain knowledge transforms raw signals into a representation the model can exploit.
-
-| Feature Group                | Description                                   | Technique                                                         |
-| ---------------------------- | --------------------------------------------- | ----------------------------------------------------------------- |
-| **Lexical Temporal Markers** | Explicit date/time tokens, ordinal references | Regex extraction + tokenization                                   |
-| **Contextual Embeddings**    | Dense semantic representation of input text   | `[EMBEDDING MODEL: e.g., sentence-transformers/all-MiniLM-L6-v2]` |
-| **[CUSTOM FEATURE GROUP 1]** | [DESCRIPTION]                                 | [METHOD]                                                          |
-| **[CUSTOM FEATURE GROUP 2]** | [DESCRIPTION]                                 | [METHOD]                                                          |
-| **Statistical Aggregates**   | Distribution statistics over input sequences  | Rolling stats, percentile features                                |
-
-> 💡 Feature importance analysis revealed that **[KEY FINDING: e.g., *contextual embeddings contributed ~X% of predictive signal*]**, which informed the final architecture decision.
+2. **Physics-based pixel heuristics:**
+   - **Step-size acceleration:** In gravity-dominated physics, objects accelerate over time, so frame-to-frame visual change increases. The direction where step sizes grow is preferred.
+   - **Smoothness asymmetry:** Physical motion is smooth; the direction with smoother early-stage step sizes is preferred.
+   - **Vertical center-of-mass trend:** Objects under gravity move downward over time. A downward trend in the luminance-weighted vertical center of mass indicates the forward direction.
 
 ---
 
-### Stage 3 — 🏗️ Model Architecture
-
-ChronoSherlock's core predictive engine is a **[MODEL TYPE: e.g., *LightGBM ensemble / fine-tuned DeBERTa-v3 with regression head / stacked generalization framework*]**.
+## Repository Structure
 
 ```
-Input Features
-      │
-      ▼
-[LAYER / MODULE 1: e.g., Embedding Layer / Input Projection]
-      │
-      ▼
-[LAYER / MODULE 2: e.g., Transformer Encoder / Gradient Boosting Trees]
-      │
-      ▼
-[LAYER / MODULE 3: e.g., Pooling / Feature Aggregation]
-      │
-      ▼
-[OUTPUT HEAD: e.g., Linear Regression Head / Softmax Classifier]
-      │
-      ▼
-  Prediction
-```
-
-**Key architectural decisions:**
-
-- **[DECISION 1]**: [RATIONALE — e.g., *Used DeBERTa over BERT due to its disentangled attention mechanism, which better captures positional temporal cues.*]
-- **[DECISION 2]**: [RATIONALE]
-- **[DECISION 3]**: [RATIONALE]
-
----
-
-### Stage 4 — 📐 Training Configuration
-
-| Hyperparameter       | Value                                                    |
-| -------------------- | -------------------------------------------------------- |
-| **Loss Function**    | `[LOSS: e.g., MAE / Huber Loss / CrossEntropy]`          |
-| **Optimizer**        | `[OPTIMIZER: e.g., AdamW (lr=2e-5)]`                     |
-| **LR Scheduler**     | `[SCHEDULER: e.g., CosineAnnealingWarmRestarts]`         |
-| **Batch Size**       | `[BATCH SIZE]`                                           |
-| **Epochs / Rounds**  | `[EPOCHS]`                                               |
-| **Regularization**   | `[e.g., Dropout=0.1, weight_decay=0.01, early stopping]` |
-| **Cross-Validation** | `[CV STRATEGY: e.g., 5-Fold Stratified CV]`              |
-| **Hardware**         | `[HARDWARE: e.g., NVIDIA T4 / P100 on Kaggle Notebooks]` |
-
----
-
-### Stage 5 — 🔮 Inference & Ensemble
-
-[DESCRIBE YOUR INFERENCE STRATEGY: e.g., *Single best model checkpoint selected by validation loss* / *Ensemble of N models trained on different folds using soft-voting / rank averaging*]
-
-- **[ENSEMBLE METHOD IF APPLICABLE]**: [DESCRIPTION]
-- **Test-Time Augmentation (TTA)**: [YES/NO — DESCRIBE IF APPLICABLE]
-- **Post-processing**: [e.g., *Clipping predictions to valid temporal range, log-space transformation inversion*]
-
----
-
-## 📁 Repository Structure
-
-```
-ChronoSherlock/
-│
-├── 📂 data/
-│   ├── raw/                  # Original competition data (not tracked by Git)
-│   └── processed/            # Cleaned and feature-engineered datasets
-│
-├── 📂 notebooks/
-│   ├── 01_eda.ipynb           # Exploratory Data Analysis
-│   ├── 02_feature_engineering.ipynb
-│   └── 03_modeling.ipynb
-│
-├── 📂 src/
-│   ├── data_processing.py    # Data cleaning & preprocessing pipeline
-│   ├── feature_engineering.py
-│   ├── model.py              # Model definition and architecture
-│   ├── train.py              # Training loop
-│   └── inference.py          # Inference & submission generation
-│
-├── 📂 configs/
-│   └── config.yaml           # All hyperparameters and paths
-│
-├── 📂 outputs/
-│   └── submissions/          # Generated CSV files for Kaggle submission
-│
-├── image_938557.jpg          # Leaderboard proof of performance
+MLWare26-Sherlock Files/
+├── src/
+│   ├── config.py              # All paths, hyperparameters, constants
+│   ├── solve.py               # Main solver: TSP + direction + eval + submit
+│   ├── extract_features.py    # One-time DINOv2 feature extraction (for direction model)
+│   ├── dataset.py             # Cached-feature dataset for transformer training
+│   ├── model.py               # Transformer head architecture
+│   ├── train.py               # Transformer training loop
+│   ├── inference.py           # Model-only inference (superseded by solve.py)
+│   └── metrics.py             # Kendall tau calculation
+├── weights/
+│   └── transformer_best_model.pth
+├── features/                  # Cached DINOv2 features (generated by extract_features.py)
+│   ├── train/
+│   └── test/
+├── data/
+│   ├── train/                 # Training videos (.mp4)
+│   ├── test/                  # Test videos (.mp4)
+│   ├── train_labels.json      # Ground truth labels
+│   └── sample_submission.csv  # Expected submission format
 ├── requirements.txt
-├── README.md
-└── LICENSE
+└── README.md
+```
+
+The primary entry point is `src/solve.py`. The other modules (`train.py`, `model.py`, etc.) support the transformer direction model but are not needed for the core TSP solver.
+
+---
+
+## How to Run
+
+### Prerequisites
+
+The code is designed to run on Google Colab with a T4 GPU. Install dependencies:
+
+```python
+!pip install torch torchvision numpy scipy opencv-python pandas scikit-learn
+```
+
+### Step 1: Copy Data to Local Disk
+
+```python
+!mkdir -p /content/dataset
+!cp -r '/content/drive/MyDrive/MLWare26-Sherlock Files/data/train' /content/dataset/
+!cp -r '/content/drive/MyDrive/MLWare26-Sherlock Files/data/test'  /content/dataset/
+!cp    '/content/drive/MyDrive/MLWare26-Sherlock Files/data/train_labels.json' /content/dataset/
+```
+
+### Step 2 (Optional): Extract DINOv2 Features for Direction Model
+
+Only needed if you want to use the trained transformer model for direction prediction. Takes approximately 60 minutes.
+
+```python
+%cd '/content/drive/MyDrive/MLWare26-Sherlock Files/'
+!python -m src.extract_features
+```
+
+### Step 3 (Optional): Train the Transformer Direction Model
+
+```python
+!python -m src.train
+```
+
+### Step 4: Evaluate on Training Data
+
+```python
+# Quick evaluation on 500 videos (~20 minutes)
+!python -m src.solve --eval --max-train 500
+
+# Full evaluation on all training videos
+!python -m src.solve --eval
+```
+
+This reports:
+
+- **Undirected τ** — TSP path quality ignoring direction
+- **Model-directed τ** — using the transformer for direction
+- **Pixel-heuristic-directed τ** — using physics cues for direction
+- **Ensemble-directed τ** — combining both (expected Kaggle score)
+
+### Step 5: Generate Test Submission
+
+```python
+!python -m src.solve --submit
+# Or evaluate and submit in one go:
+!python -m src.solve --eval --submit
+```
+
+Output: `submission_tsp.csv` in the Drive root folder, ready for Kaggle upload.
+
+---
+
+## Technical Details
+
+### Pixel Feature Extraction
+
+Each video frame is resized to 48×48 pixels (RGB) and flattened into a 6912-dimensional vector. No normalization beyond dividing by 255. The low resolution is intentional: it preserves spatial layout (where objects are) while discarding fine texture that doesn't help with temporal ordering.
+
+### TSP Solver
+
+1. **Distance matrix:** Squared Euclidean distance between all frame feature pairs, computed via `scipy.spatial.distance.cdist`.
+
+2. **Multi-start nearest-neighbour:** For each possible starting frame, greedily build an open path by always visiting the nearest unvisited frame. Keep the shortest path across all starts. Complexity: O(N²) per start, O(N³) total.
+
+3. **2-opt refinement:** Iteratively reverse sub-paths to reduce total path length. Converges in a few sweeps for N ≤ 300. Complexity: O(N²) per sweep.
+
+For N = 250 frames, the complete solve takes approximately 0.3 seconds per video.
+
+### Submission Format
+
+Each row contains a video ID and a bracketed list of 1-indexed frame positions representing the predicted chronological order:
+
+```
+ID,order
+video_5000,"[5, 6, 7, 8, 9, 4, 3, 2, 1, 0]"
+```
+
+The code reads `sample_submission.csv` to determine the exact expected frame count for each test video, then validates that every output is a valid 1..N permutation before writing.
+
+### Handling Videos Longer Than MAX_FRAMES
+
+For videos with more frames than `MAX_FRAMES` (300, which covers all videos in this dataset), the TSP is solved on the uniformly sampled subset. Temporal scores are then interpolated to all frames using `numpy.interp`, and the full permutation is recovered via `argsort`.
+
+---
+
+## Configuration
+
+All configurable parameters are in `src/config.py`:
+
+| Parameter             | Value | Purpose                                    |
+| --------------------- | ----- | ------------------------------------------ |
+| `MAX_FRAMES`          | 300   | Captures every frame (dataset max is 288)  |
+| `PIXEL_SIZE`          | 48    | Pixel feature resolution (in solve.py)     |
+| `FEAT_DIM`            | 384   | DINOv2-Small embedding dimension           |
+| `EMBED_DIM`           | 256   | Transformer head hidden size               |
+| `NUM_LAYERS`          | 2     | Transformer encoder layers                 |
+| `DROPOUT`             | 0.30  | Regularization strength                    |
+| `BATCH_SIZE`          | 32    | Training batch size                        |
+| `EARLY_STOP_PATIENCE` | 7     | Epochs without improvement before stopping |
+
+---
+
+## Evolution of the Approach
+
+1. **v1 — DINOv2-Base + 4-layer Transformer:** Trained for 4 hours on Colab, only completed 2 epochs. Val τ ≈ 0.07. Bottleneck: re-running the backbone every epoch.
+
+2. **v2 — Cached DINOv2-Small features + lighter Transformer:** Feature extraction done once, training reduced to ~30s/epoch. 60 epochs completed. Val τ ≈ 0.068. Severe overfitting regardless of model size or regularization. Concluded that single-frame DINOv2 features hit a ceiling at τ ≈ 0.06.
+
+3. **v3 — TSP on DINOv2 features:** Undirected path quality τ = 0.39. Direction prediction was near random (LR accuracy 50.6%). DINOv2's invariance to small visual changes was identified as the bottleneck.
+
+4. **v4 (current) — TSP on raw pixel features:** Pixel L2 distance is sensitive to exactly the small spatial changes between adjacent frames. Direction predicted via an ensemble of the trained transformer model and physics-based heuristics.
+
+---
+
+## Requirements
+
+```
+torch>=2.1
+torchvision>=0.16
+numpy>=1.24
+scipy>=1.10
+opencv-python>=4.8
+pandas>=2.0
+scikit-learn>=1.3
 ```
 
 ---
 
-## ⚙️ Installation
+## Acknowledgments
 
-Ensure you have **Python 3.10+** installed.
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/apoorva-ppl/ChronoSherlock.git
-cd ChronoSherlock
-
-# 2. (Recommended) Create and activate a virtual environment
-python -m venv .venv
-source .venv/bin/activate        # Linux / macOS
-# .venv\Scripts\activate         # Windows
-
-# 3. Install all dependencies
-pip install -r requirements.txt
-```
-
-> **Note:** If you intend to use GPU acceleration, ensure you install the CUDA-compatible version of PyTorch matching your driver. Refer to the [official PyTorch installation guide](https://pytorch.org/get-started/locally/).
-
----
-
-## 🚀 Usage
-
-### Running the Full Pipeline
-
-```bash
-# Step 1: Preprocess raw competition data
-python src/data_processing.py --config configs/config.yaml
-
-# Step 2: Engineer features
-python src/feature_engineering.py --config configs/config.yaml
-
-# Step 3: Train the model
-python src/train.py --config configs/config.yaml
-
-# Step 4: Generate inference / submission file
-python src/inference.py \
-    --config configs/config.yaml \
-    --checkpoint outputs/best_model.pt \
-    --output outputs/submissions/submission.csv
-```
-
-### Quick Inference on Pre-trained Checkpoint
-
-```bash
-# Run inference directly using the best saved checkpoint
-python src/inference.py \
-    --config configs/config.yaml \
-    --checkpoint outputs/best_model.pt \
-    --data data/raw/test.csv \
-    --output outputs/submissions/submission.csv
-```
-
-### Configuration
-
-All key parameters are centralized in `configs/config.yaml`:
-
-```yaml
-# configs/config.yaml (example)
-data:
-  train_path: "data/raw/train.csv"
-  test_path: "data/raw/test.csv"
-  processed_path: "data/processed/"
-
-model:
-  architecture: "[YOUR_ARCHITECTURE]"
-  hidden_dim: [HIDDEN_DIM]
-  dropout: [DROPOUT]
-
-training:
-  epochs: [EPOCHS]
-  batch_size: [BATCH_SIZE]
-  learning_rate: [LR]
-  seed: 42
-```
-
----
-
-## 📊 Results & Evaluation
-
-ChronoSherlock was evaluated using the official competition metric on the Kaggle platform.
-
-| Split                   | Score     | Notes                                       |
-| ----------------------- | --------- | ------------------------------------------- |
-| **Public Leaderboard**  | `0.13024` | ~20% of test data                           |
-| **Private Leaderboard** | `0.11012` | ~80% of test data — **final ranking score** |
-
-The **−0.02012 improvement from public to private** score demonstrates that ChronoSherlock is not a leaderboard-overfit solution. The regularization strategy, cross-validation discipline, and feature engineering generalize cleanly to the full held-out distribution — the ultimate measure of a model's real-world viability.
-
----
-
-## 🛠️ Tech Stack
-
-| Category                | Technology                                           |
-| ----------------------- | ---------------------------------------------------- |
-| **Language**            | Python 3.10+                                         |
-| **Deep Learning**       | PyTorch 2.x                                          |
-| **Classical ML**        | Scikit-Learn, LightGBM / XGBoost                     |
-| **NLP / Embeddings**    | HuggingFace Transformers, Sentence-Transformers      |
-| **Data Manipulation**   | Pandas, NumPy                                        |
-| **Experiment Tracking** | [e.g., Weights & Biases / MLflow / Kaggle Notebooks] |
-| **Visualization**       | Matplotlib, Seaborn                                  |
-| **Environment**         | Kaggle Notebooks / Local GPU                         |
-
----
-
-## 📜 License
-
-This project is licensed under the **MIT License**. See [LICENSE](./LICENSE) for full terms.
-
----
-
-<div align="center">
-
-**Built with 🔎 precision and ☕ caffeine for MLWare'26 — Sherlock Files @ IIT-BHU**
-
-_If this repository was useful to you, please consider giving it a ⭐_
-
-[![GitHub stars](https://img.shields.io/github/stars/apoorva-ppl/ChronoSherlock?style=social)](https://github.com/apoorva-ppl/ChronoSherlock)
-
-</div>
+- **DINOv2** (Meta AI): Used for direction model features
+- **MLWare '26** (Technex, IIT BHU): Competition organizers
+- Dataset: Physics simulation videos from the Kaggle competition
