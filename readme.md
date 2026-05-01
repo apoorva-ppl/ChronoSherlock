@@ -22,6 +22,17 @@ The corruption preserves local structure within blocks — adjacent frames in th
 
 We solve this as a Travelling Salesman Problem (TSP) on frame features.
 
+## Proof of Submission
+
+I successfully submitted my solution for the **MLWare '26 - Sherlock Files** competition.
+
+- Achieved a competitive score on the leaderboard
+- Demonstrates the effectiveness of the proposed approach
+
+### Submission Screenshot
+
+![Proof of Submission](images/leaderboard.jpeg)
+
 ### Why Pixel Features, Not DINOv2
 
 Our first approach used DINOv2 (a self-supervised vision transformer) for frame embeddings, but it achieved only τ ≈ 0.39 undirected path quality. The reason: DINOv2 is designed to be _invariant_ to small visual changes — it maps a cat at pixel (100, 50) and a cat at pixel (103, 52) to nearly identical embeddings. But temporal adjacency _is_ a small visual change (an object shifted by a few pixels between consecutive frames). DINOv2 deliberately discards exactly the signal we need.
