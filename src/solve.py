@@ -1,25 +1,3 @@
-"""
-Sherlock Files solver — pixel-feature TSP + ensemble direction.
-
-DINOv2 features gave undirected τ=0.39. DINOv2 is designed to be INVARIANT
-to small visual changes. But temporal adjacency IS a small visual change
-(object moved 3 pixels). So DINOv2 is the wrong tool for the TSP distance.
-
-Pixel features at 48×48 are SENSITIVE to exactly these small changes.
-For physics videos with fixed cameras, pixel L2 directly measures how much
-stuff moved between frames — which is minimal for adjacent frames.
-
-Pipeline:
-  1. Read each video → resize frames to 48×48 → pixel feature vectors
-  2. L2 distance matrix → multi-start NN-TSP → 2-opt
-  3. Direction: ensemble of trained model + physics heuristics
-  4. Evaluate on training data / generate submission
-
-Run:
-  !python -m src.solve --eval --max-train 500   # quick eval (~20 min)
-  !python -m src.solve --submit                   # test submission (~15 min)
-  !python -m src.solve --eval --submit            # both
-"""
 import os, sys, json, csv, ast, time, argparse
 import numpy as np
 import cv2
@@ -36,7 +14,7 @@ from src.config import (
     NUM_LAYERS, DROPOUT,
 )
 
-# Where to find raw videos (try local copy first, then Drive)
+#location of raw files
 _VIDEO_DIRS = {
     "train": ["/content/dataset/train",
               os.path.join(DRIVE_ROOT, "data", "train")],
@@ -44,13 +22,10 @@ _VIDEO_DIRS = {
               os.path.join(DRIVE_ROOT, "data", "test")],
 }
 
-PIXEL_SIZE = 48          # resize target — 48×48×3 = 6912-dim feature
-USE_GRAYSCALE = False    # RGB works better than grayscale for this task
+PIXEL_SIZE = 48        
+USE_GRAYSCALE = False    #RGB performed better than grayscale because color provides additional visual information.
 
-# ═══════════════════════════════════════════════════════════════════════
-# PIXEL FEATURE EXTRACTION (from raw video, no GPU needed)
-# ═══════════════════════════════════════════════════════════════════════
-
+#locate the vdo
 def find_video_dir(split):
     for d in _VIDEO_DIRS.get(split, []):
         if os.path.isdir(d):
@@ -59,22 +34,18 @@ def find_video_dir(split):
 
 
 def find_video_path(video_dir, vid_id):
-    """Handle possible spaces or duplicates in filenames."""
     video_dir = Path(video_dir)
     for p in video_dir.glob(f"{vid_id}*.mp4"):
         return str(p)
     return None
 
-
+#part1
+#converts raw vdo into numerical features vectors
 def extract_pixel_features(video_path, max_frames=MAX_FRAMES):
-    """
-    Read video, uniformly sample up to max_frames, resize to PIXEL_SIZE,
-    flatten to vectors. Returns (feats [N, D], sampled_indices [N], total).
-    """
-    cap = cv2.VideoCapture(video_path)
-    total = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 1)
-    n_sample = min(max_frames, total)
-    indices = np.linspace(0, total - 1, n_sample, dtype=int)
+    cap = cv2.VideoCapture(video_path) #open the vdo such that openCV can read its frames
+    total = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 1) #Find how many frames are present in the video
+    n_sample = min(max_frames, total) #decides the number of frames to process at once
+    indices = np.linspace(0, total - 1, n_sample, dtype=int) #Select frames evenly throughout the video.
 
     frames = []
     for idx in indices:
@@ -96,11 +67,9 @@ def extract_pixel_features(video_path, max_frames=MAX_FRAMES):
     feats = np.stack(frames)  # [N, D]
     return feats, indices, total
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# TSP SOLVER (same as before, proven to work)
-# ═══════════════════════════════════════════════════════════════════════
-
+#part-2
+#nn heuristic provides a fast approximation by repeatedly visiting the closest unvisited frame, making it suitable for hundreds of frames.
+#since, tsp exactly is computationally expensive 
 def nn_tsp(dist, max_starts=None):
     N = dist.shape[0]
     if N <= 2:
@@ -120,7 +89,8 @@ def nn_tsp(dist, max_starts=None):
             best_cost, best_path = cost, path
     return best_path
 
-
+#part-3
+#improves that path by removing inefficient connections and reducing the overall path cost.
 def two_opt(path, dist, sweeps=15):
     N = len(path)
     if N < 4: return path
@@ -128,9 +98,9 @@ def two_opt(path, dist, sweeps=15):
         improved = False
         for i in range(1, N - 1):
             di = dist[path[i - 1], path[i]]
-            for j in range(i + 1, N):
+            for j in range(i + 1, N): #reverse the same edge instead of reconnecting same edge , connect em differently
                 if j == N - 1:
-                    old, new = di, dist[path[i - 1], path[j]]
+                    old, new = di, dist[path[i - 1], path[j]] #compare costs after reversal
                 else:
                     old = di + dist[path[j], path[j + 1]]
                     new = dist[path[i - 1], path[j]] + dist[path[i], path[j + 1]]
@@ -148,11 +118,6 @@ def solve_tsp(feats, max_starts=80, max_2opt=15):
     dist = cdist(feats, feats, metric="sqeuclidean")
     path = nn_tsp(dist, max_starts=max_starts)
     return two_opt(path, dist, sweeps=max_2opt)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# DIRECTION PREDICTION
-# ═══════════════════════════════════════════════════════════════════════
 
 # (A) Trained transformer model
 class _V1Model(nn.Module):
@@ -242,8 +207,7 @@ def pixel_direction_score(pixel_feats, path):
 
     scores = []
 
-    # 1. Step-size trend: in gravity-dominated physics, objects accelerate
-    #    → step sizes increase in the correct direction
+
     diffs = np.diff(ordered, axis=0)
     step_norms = np.linalg.norm(diffs, axis=1)
     if len(step_norms) >= 6:
@@ -254,8 +218,7 @@ def pixel_direction_score(pixel_feats, path):
         scores.append((last_third - first_third) /
                        (first_third + last_third + 1e-9))
 
-    # 2. Smoothness: correct direction should have smoother step sizes
-    #    (physics is smooth, reversed physics appears jerky)
+
     if len(step_norms) >= 10:
         half = len(step_norms) // 2
         # Second derivative: changes in step size
@@ -266,7 +229,7 @@ def pixel_direction_score(pixel_feats, path):
         scores.append((second_half_smooth - first_half_smooth) /
                        (first_half_smooth + second_half_smooth + 1e-9))
 
-    # 3. Vertical center of mass trend (if RGB, use luminance)
+
     D = pixel_feats.shape[1]
     sz = PIXEL_SIZE
     ch = 1 if USE_GRAYSCALE else 3
@@ -308,10 +271,6 @@ def predict_direction(model, dino_feats, pixel_feats, path):
 
     return 1 if vote < 0 else 0
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# EVALUATE ON TRAINING DATA
-# ═══════════════════════════════════════════════════════════════════════
 
 def evaluate(max_videos=None):
     print("=" * 65)
@@ -419,11 +378,6 @@ def evaluate(max_videos=None):
     print(f"  {'─' * 55}")
     return model
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# TEST SUBMISSION
-# ═══════════════════════════════════════════════════════════════════════
-
 def load_expected():
     for p in [SAMPLE_SUB_PATH, os.path.join(DRIVE_ROOT, "sample_submission.csv"),
               os.path.join(DRIVE_ROOT, "data", "sample_submission.csv"),
@@ -513,8 +467,6 @@ def submit(model, name="submission_tsp.csv"):
     df.to_csv(out, index=False)
     print(f"\n  Saved: {out} ({len(df)} rows ✓)")
 
-
-# ═══════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--eval", action="store_true")

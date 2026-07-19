@@ -1,23 +1,3 @@
-"""
-One-time feature extraction.
-
-Walks every video in TRAIN_DIR and TEST_DIR, extracts up to MAX_FRAMES
-frames uniformly, runs DINOv2-Small over them in FP16, and caches the
-resulting feature tensor to disk as:
-
-    FEATURES_DIR/train/<video_id>.pt
-    FEATURES_DIR/test/<video_id>.pt
-
-Each .pt file stores a dict:
-    {
-        "features": FloatTensor [N, 384],   # fp16 on disk, fp32 at load
-        "sampled_indices": LongTensor [N],   # corrupted-video positions
-        "total_frames": int,
-    }
-
-Run once before training. Safe to re-run: videos whose features already
-exist on disk are skipped, so you can resume if Colab disconnects.
-"""
 import os
 import sys
 import time
@@ -33,9 +13,8 @@ from src.config import (
 
 _NORM = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
-
+#load DINOV2
 def load_backbone():
-    """Load DINOv2-Small from torch.hub, eval mode, on GPU."""
     print(f"Loading backbone: {BACKBONE_HUB} ...")
     model = torch.hub.load(
         "facebookresearch/dinov2", BACKBONE_HUB,
@@ -43,14 +22,13 @@ def load_backbone():
     )
     model.eval().to(DEVICE)
     for p in model.parameters():
-        p.requires_grad = False
+        p.requires_grad = False #as we arent updating DINOV2 , just using it as a feature extractor
     if EXTRACT_FP16:
-        model = model.half()
+        model = model.half() #fp16 reduces memory usage + increases inference speed
     return model
 
-
+#same as pixel extraction in solve.py (224x224)
 def sample_frames(video_path, max_frames, img_size):
-    """Uniformly sample up to `max_frames` frames as a normalised tensor."""
     cap = cv2.VideoCapture(str(video_path))
     total = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 1)
     n_sample = min(max_frames, total)
@@ -67,7 +45,7 @@ def sample_frames(video_path, max_frames, img_size):
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         # HWC uint8 → CHW float in [0,1]
         t = torch.from_numpy(frame).permute(2, 0, 1).float().div_(255.0)
-        frames.append(_NORM(t))
+        frames.append(_NORM(t)) 
     cap.release()
 
     if not frames:
@@ -76,8 +54,8 @@ def sample_frames(video_path, max_frames, img_size):
 
 
 @torch.no_grad()
+#extracts in batches ,faster because GPUs process data in parallel.
 def extract_one(model, video_path, out_path):
-    """Extract features for a single video and save to out_path."""
     frames, sampled_indices, total = sample_frames(video_path, MAX_FRAMES, IMG_SIZE)
 
     # Batch through the backbone
@@ -86,9 +64,9 @@ def extract_one(model, video_path, out_path):
         batch = frames[i:i + EXTRACT_BATCH].to(DEVICE, non_blocking=True)
         if EXTRACT_FP16:
             batch = batch.half()
-        out = model(batch)           # [B, FEAT_DIM] (DINOv2 returns CLS token)
+        out = model(batch)          
         feats_all.append(out.float().cpu())
-    feats = torch.cat(feats_all, dim=0)  # [N, FEAT_DIM]
+    feats = torch.cat(feats_all, dim=0)  
 
     # Store as fp16 on disk to halve storage — we cast back to fp32 at load time
     torch.save({
@@ -97,9 +75,8 @@ def extract_one(model, video_path, out_path):
         "total_frames": int(total),
     }, out_path)
 
-
+#extract both splits(train n split)
 def extract_split(model, video_dir, feat_dir):
-    """Extract features for every .mp4 in video_dir, saving to feat_dir."""
     video_dir = Path(video_dir)
     feat_dir  = Path(feat_dir)
     feat_dir.mkdir(parents=True, exist_ok=True)
@@ -110,9 +87,9 @@ def extract_split(model, video_dir, feat_dir):
     done, skipped = 0, 0
     t0 = time.time()
     for idx, vp in enumerate(videos):
-        vid_id = vp.stem.split(" ")[0]     # strip trailing " (1)" etc.
+        vid_id = vp.stem.split(" ")[0]    
         out_path = feat_dir / f"{vid_id}.pt"
-        if out_path.exists():
+        if out_path.exists(): #skip existing file ,this makes extraction resumable.
             skipped += 1
             continue
         try:
