@@ -169,13 +169,11 @@ def load_dino_features(vid_id, split="train"):
     pay = torch.load(p, map_location="cpu", weights_only=False)
     return pay["features"].float().numpy()
 
-
+#transformer model vote
+#uses the trained Transformer to determine whether the TSP path is forward or reversed
 @torch.no_grad()
 def model_direction_score(model, dino_feats, path):
-    """
-    Correlation between model's predicted scores and TSP path position.
-    Positive → forward is correct.
-    """
+
     N = len(path)
     if dino_feats is None or dino_feats.shape[0] < N:
         return 0.0
@@ -193,12 +191,8 @@ def model_direction_score(model, dino_feats, path):
     return c if not np.isnan(c) else 0.0
 
 
-# (B) Physics-based pixel heuristics
+# (B) Physics-based pixel heuristics(to solve direction ambiguity)
 def pixel_direction_score(pixel_feats, path):
-    """
-    Combine several pixel-based temporal cues.
-    Returns a float: positive → forward is correct.
-    """
     N = len(path)
     if N < 6:
         return 0.0
@@ -222,7 +216,7 @@ def pixel_direction_score(pixel_feats, path):
     if len(step_norms) >= 10:
         half = len(step_norms) // 2
         # Second derivative: changes in step size
-        accel = np.abs(np.diff(step_norms))
+        accel = np.abs(np.diff(step_norms)) 
         first_half_smooth = accel[:half].mean()
         second_half_smooth = accel[half:].mean()
         # Prefer direction where early part is smoother

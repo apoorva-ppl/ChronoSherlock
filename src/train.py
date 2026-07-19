@@ -1,13 +1,3 @@
-"""
-Training with heavy regularization + early stopping.
-
-Main differences from v1:
-  • Early-stops when val τ plateaus for EARLY_STOP_PATIENCE epochs.
-  • Gracefully skips loading an incompatible old checkpoint (the model
-    architecture changed, so the old .pth won't fit).
-  • Saves both EMA and raw-model checkpoints — we've seen cases where
-    the raw model beats EMA on this task.
-"""
 import os
 import copy
 import math
@@ -22,11 +12,7 @@ from src.dataset import SherlockFeatureDataset, feature_collate_fn
 from src.model import TemporalReorderModel
 from src.metrics import calculate_kendall_tau
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# VECTORISED LOSSES  (unchanged)
-# ─────────────────────────────────────────────────────────────────────────────
-
+#compares every pair frames independently 
 def pairwise_bce_loss(pair_logits, target_ranks, mask):
     B, T, _ = pair_logits.shape
     r_i = target_ranks.unsqueeze(2)                    # [B, T, 1]
@@ -41,7 +27,7 @@ def pairwise_bce_loss(pair_logits, target_ranks, mask):
     denom = pair_mask.sum().clamp(min=1).float()
     return (bce * pair_mask.float()).sum() / denom
 
-
+#compares entire sequence ranking at once
 def listmle_loss(scores, target_ranks, mask):
     B, T = scores.shape
     loss_sum = scores.new_zeros(())
@@ -61,11 +47,7 @@ def listmle_loss(scores, target_ranks, mask):
         count += 1
     return loss_sum / max(count, 1)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# EMA
-# ─────────────────────────────────────────────────────────────────────────────
-
+#ema=Average of Previous Weights, smoothens the weight updates 
 class EMA:
     def __init__(self, model, decay):
         self.decay = decay
@@ -82,11 +64,7 @@ class EMA:
     def state_dict(self):
         return self.shadow
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# DATA / TRAIN
-# ─────────────────────────────────────────────────────────────────────────────
-
+#train
 def build_loaders():
     train_base = SherlockFeatureDataset(
         features_dir=os.path.join(FEATURES_DIR, "train"),

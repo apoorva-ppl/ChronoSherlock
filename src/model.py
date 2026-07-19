@@ -1,21 +1,3 @@
-"""
-Transformer head with RankNet-style (antisymmetric) pairwise logits.
-
-Previously the pairwise head was Q·K^T — unconstrained, so the model could
-learn non-transitive "A precedes B precedes C precedes A" relationships
-that overfit the training set. Kendall tau requires a total order, so
-giving the model freedom to violate transitivity is actively harmful.
-
-Now: pair_logits[i,j] = score_j − score_i  (antisymmetric by construction).
- - Enforces a total order
- - Halves the ranking-specific parameter count
- - Ties the two heads together so they can't contradict each other
-
-Scalar-score convention (unchanged): higher score = LATER in time.
-Therefore pair_logits[i,j] = score_j − score_i is HIGH when j is later
-than i, i.e. when i precedes j — which is exactly the label we train
-against.
-"""
 import torch
 import torch.nn as nn
 
@@ -27,11 +9,11 @@ class TemporalReorderModel(nn.Module):
         self.feat_dim  = feat_dim
         self.embed_dim = embed_dim
 
-        self.input_proj = nn.Sequential(
-            nn.Linear(feat_dim, embed_dim),
-            nn.LayerNorm(embed_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
+        self.input_proj = nn.Sequential( #contains(linear,layernorm,GELU,dropout)
+            nn.Linear(feat_dim, embed_dim), #learns task specific representation instead of directly using generic DINOV2 features
+            nn.LayerNorm(embed_dim), 
+            nn.GELU(), #GELU provides smoother nonlinear activation than ReLU
+            nn.Dropout(dropout), #stabilizes the transformer output before passing it to the prediction head.
         )
 
         enc_layer = nn.TransformerEncoderLayer(
@@ -47,6 +29,8 @@ class TemporalReorderModel(nn.Module):
         self.final_norm  = nn.LayerNorm(embed_dim)
 
         # Only a scalar-score head. No separate pairwise projection.
+        #ensures consistency + transitive frame rankings
+        #pairwise seperate predictions have v large params + inconsistent result
         self.score_head = nn.Sequential(
             nn.Linear(embed_dim, embed_dim // 2),
             nn.GELU(),
@@ -55,22 +39,10 @@ class TemporalReorderModel(nn.Module):
         )
 
     def forward(self, feats, src_key_padding_mask=None):
-        """
-        feats                : [B, T, FEAT_DIM]
-        src_key_padding_mask : [B, T], True at PADDING positions
-
-        Returns:
-            scores      : [B, T]      higher = later in time
-            pair_logits : [B, T, T]   score_j − score_i
-        """
         x = self.input_proj(feats)
         x = self.transformer(x, src_key_padding_mask=src_key_padding_mask)
         x = self.final_norm(x)
-        scores = self.score_head(x).squeeze(-1)               # [B, T]
-
-        # Antisymmetric pairwise logits (RankNet).
-        # pair_logits[b, i, j] = scores[b, j] - scores[b, i]
-        #                      > 0 when j is later than i, i.e. i precedes j
+        scores = self.score_head(x).squeeze(-1)        
         pair_logits = scores.unsqueeze(1) - scores.unsqueeze(2)
 
         return scores, pair_logits
